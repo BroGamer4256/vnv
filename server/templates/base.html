@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.min.js" integrity="sha512-WW8/jxkELe2CAiE4LvQfwm1rajOS8PHasCCx+knHG0gBHt8EXxS6T6tJRTGuDQVnluuAvMxWF4j8SNFDKceLFg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootswatch/5.3.2/pulse/bootstrap.min.css" integrity="sha512-KdepqfaVpN2tMBgqUzhDSJopY8r3Dzoct5lmxR5Zov/oDm9Qfjj4PXTcXrS14wsTkk5hrIVDtpUvNC10SKmIfg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+
+<body>
+	<div class="navbar navbar-expand fixed-top bg-primary" data-bs-theme="dark">
+		<div class="container">
+			<ul class="navbar-nav me-auto">
+				<li class="navbar-nav">
+					<a class="navbar-brand" href="/">VS No VPN</a>
+				</li>
+				{% if !user.is_some() %}
+				<li class="navbar-nav">
+					<a class="nav-link" href="https://discord.com/api/oauth2/authorize?client_id=1202965157790093393&response_type=code&redirect_uri=https%3A%2F%2Fmaxitune.net%2Flogin&scope=identify">Login</a>
+				</li>
+				{% else %}
+				<li class="navbar-nav">
+					<a class="nav-link" href="/create_group">Create Group</a>
+				</li>
+				<li class="navbar-nav">
+					<a class="nav-link" href="/guide">Guide</a>
+				</li>
+				{% endif %}
+				<li class="navbar-nav">
+					<a class="nav-link" href="/about">About</a>
+				</li>
+			</ul>
+		</div>
+	</div>
+	<br><br><br><br>
+	<div class="container">
+		{% block content %}{% endblock content %}
+	</div>
+</body>
+</html>

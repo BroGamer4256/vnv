@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::*;
-use axum::extract::*;
 use axum::http::header::*;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
@@ -9,6 +8,16 @@ use axum::response::Redirect;
 use axum::RequestPartsExt;
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use serde::{Deserialize, Serialize};
+
+impl Group {
+	pub fn contains_user(&self, user: &User) -> bool {
+		self.users
+			.iter()
+			.filter(|(u, _)| u.id == user.id)
+			.collect::<Vec<_>>()
+			.len() > 0
+	}
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
@@ -21,6 +30,30 @@ pub struct User {
 pub struct Token {
 	pub exp: i64,
 	pub user_id: i64,
+}
+
+impl User {
+	pub async fn parse(token: &str, state: &AppState) -> Result<Self, StatusCode> {
+		let token_data = jsonwebtoken::decode::<Token>(
+			&token,
+			&state.config.decoding_key,
+			&Validation::default(),
+		)
+		.map_err(|_| StatusCode::UNAUTHORIZED)?;
+		let user = sqlx::query!(
+			"SELECT * FROM users WHERE id = $1",
+			token_data.claims.user_id
+		)
+		.fetch_one(&state.db)
+		.await
+		.map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+		Ok(User {
+			id: user.id,
+			username: user.username,
+			avatar: user.avatar,
+		})
+	}
 }
 
 #[axum::async_trait]
@@ -50,25 +83,7 @@ where
 			}
 		};
 		let state = AppState::from_ref(state);
-		let token_data = jsonwebtoken::decode::<Token>(
-			&token,
-			&state.config.decoding_key,
-			&Validation::default(),
-		)
-		.map_err(|_| StatusCode::UNAUTHORIZED)?;
-		let user = sqlx::query!(
-			"SELECT * FROM users WHERE id = $1",
-			token_data.claims.user_id
-		)
-		.fetch_one(&state.db)
-		.await
-		.map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-		Ok(User {
-			id: user.id,
-			username: user.username,
-			avatar: user.avatar,
-		})
+		Self::parse(&token, &state).await
 	}
 }
 
@@ -97,7 +112,7 @@ pub async fn login(
 	#[derive(Serialize, Deserialize)]
 	struct DiscordUser {
 		id: String,
-		username: String,
+		global_name: String,
 		discriminator: String,
 		avatar: Option<String>,
 	}
@@ -152,7 +167,7 @@ pub async fn login(
 	sqlx::query!(
 		"INSERT INTO users VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET avatar = excluded.avatar",
 		id,
-		response.username,
+		response.global_name,
 		avatar
 	)
 	.execute(&state.db)
@@ -175,4 +190,27 @@ pub async fn login(
 	}
 
 	Err(StatusCode::UNAUTHORIZED)
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct IpAddr {
+	pub inner: std::net::IpAddr,
+}
+
+#[axum::async_trait]
+impl<S> FromRequestParts<S> for IpAddr
+where
+	S: Send + Sync,
+{
+	type Rejection = StatusCode;
+
+	async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+		let forwarded = parts
+			.headers
+			.get("x-forwarded-for")
+			.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+		let ip = forwarded.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
+		let ip = std::net::IpAddr::from_str(ip).map_err(|_| StatusCode::BAD_REQUEST)?;
+		Ok(Self { inner: ip })
+	}
 }

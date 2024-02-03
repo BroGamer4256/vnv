@@ -1,6 +1,8 @@
 #![feature(maybe_uninit_uninit_array)]
 use futures_util::{SinkExt, StreamExt};
+use serde::*;
 use socket2::*;
+use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -10,15 +12,41 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::*;
 
 const CHECKSUM: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_MPEG_2);
-type PeerSockets = Arc<Mutex<Vec<WebSocketStream<MaybeTlsStream<TcpStream>>>>>;
+type PeerSockets = Arc<Mutex<BTreeMap<i64, WebSocketStream<MaybeTlsStream<TcpStream>>>>>;
 
 mod wm;
 
+#[derive(Deserialize)]
+struct Config {
+	jwt: String,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct Group {
+	users: Vec<(User, IpAddr)>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct IpAddr {
+	pub inner: std::net::IpAddr,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct User {
+	pub id: i64,
+	pub username: String,
+	pub avatar: String,
+}
+
 #[tokio::main]
 async fn main() {
+	let config = std::fs::read_to_string("config.json").unwrap();
+	let config: Config = serde_json::from_str(&config).unwrap();
+
 	let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap();
 	socket.set_broadcast(true).unwrap();
 	socket.set_reuse_address(true).unwrap();
+	#[cfg(linux)]
 	socket.set_reuse_port(true).unwrap();
 	socket.set_multicast_ttl_v4(225).unwrap();
 	let address = SockAddr::from(std::net::SocketAddrV4::from_str("0.0.0.0:50765").unwrap());
@@ -28,10 +56,11 @@ async fn main() {
 		.unwrap();
 
 	let game_socket = Arc::new(socket);
-	let peer_sockets: PeerSockets = Arc::new(Mutex::new(Vec::new()));
+	let peer_sockets: PeerSockets = Arc::new(Mutex::new(BTreeMap::new()));
 
-	tokio::spawn(partner_server(Arc::clone(&game_socket)));
-	tokio::spawn(peer_send(Arc::clone(&game_socket), peer_sockets));
+	tokio::spawn(partner_server(game_socket.clone()));
+	tokio::spawn(peer_send(game_socket.clone(), peer_sockets.clone()));
+	game_server_connect(peer_sockets.clone(), config).await;
 }
 
 async fn partner_server_listen(stream: TcpStream, game_socket: Arc<Socket>) {
@@ -79,7 +108,55 @@ async fn peer_send(game_socket: Arc<Socket>, peers: PeerSockets) {
 		let mut peers = peers.lock().await;
 		let futures = peers
 			.iter_mut()
-			.map(|peer| peer.send(Message::Binary(buf.clone())));
+			.map(|(_, peer)| peer.send(Message::Binary(buf.clone())));
 		futures_util::future::try_join_all(futures).await.unwrap();
+	}
+}
+
+async fn game_server_connect(peers: PeerSockets, config: Config) {
+	let (mut ws, _) = tokio_tungstenite::connect_async("wss://maxitune.net/clientws")
+		.await
+		.unwrap();
+	ws.send(Message::Text(config.jwt)).await.unwrap();
+	while let Some(Ok(msg)) = ws.next().await {
+		if let Message::Text(msg) = msg {
+			let group: Group = match serde_json::from_str(&msg) {
+				Ok(group) => group,
+				Err(_) => continue,
+			};
+
+			let mut peers = peers.lock().await;
+			for (user, ip) in group.users.iter() {
+				if !peers.contains_key(&user.id) {
+					if let Ok((peer, _)) =
+						tokio_tungstenite::connect_async(dbg!(format!("ws://{}:9090", ip.inner)))
+							.await
+					{
+						println!("User {} connected", user.username);
+						peers.insert(user.id, peer);
+					}
+				}
+			}
+
+			let dead_peers = peers
+				.iter()
+				.filter(|(id, _)| {
+					group
+						.users
+						.iter()
+						.filter(|(guser, _)| &&guser.id == id)
+						.collect::<Vec<_>>()
+						.len() == 0
+				})
+				.map(|(id, _)| *id)
+				.collect::<Vec<_>>();
+
+			for id in dead_peers {
+				println!("User {id} disconnected");
+				peers.remove(&id);
+			}
+		} else if let Message::Ping(msg) = msg {
+			_ = ws.send(Message::Pong(msg)).await;
+		}
 	}
 }
