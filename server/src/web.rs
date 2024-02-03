@@ -55,13 +55,10 @@ pub async fn leave_group(
 ) -> Redirect {
 	let mut groups = state.groups.write().await;
 	if let Some(group) = groups.get_mut(&group_id) {
-		let index = group
-			.users
-			.iter()
-			.position(|(u, _)| u.id == user.id)
-			.unwrap();
-		group.users.remove(index);
-		groups.retain(|_, group| group.users.len() > 0);
+		if let Some(index) = group.users.iter().position(|(u, _)| u.id == user.id) {
+			group.users.remove(index);
+			groups.retain(|_, group| group.users.len() > 0);
+		}
 	}
 
 	Redirect::to("/")

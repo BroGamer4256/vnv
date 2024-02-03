@@ -58,7 +58,8 @@ async fn main() {
 	let game_socket = Arc::new(socket);
 	let peer_sockets: PeerSockets = Arc::new(Mutex::new(BTreeMap::new()));
 
-	tokio::spawn(partner_server(game_socket.clone()));
+	tokio::spawn(partner_server(game_socket.clone(), "127.0.0.1:9090"));
+	tokio::spawn(partner_server(game_socket.clone(), "[::1]:9090"));
 	tokio::spawn(peer_send(game_socket.clone(), peer_sockets.clone()));
 	game_server_connect(peer_sockets.clone(), config).await;
 }
@@ -82,8 +83,8 @@ async fn partner_server_listen(stream: TcpStream, game_socket: Arc<Socket>) {
 	}
 }
 
-async fn partner_server(game_socket: Arc<Socket>) {
-	let server_socket = TcpListener::bind("127.0.0.1:9090")
+async fn partner_server(game_socket: Arc<Socket>, addr: &str) {
+	let server_socket = TcpListener::bind(addr)
 		.await
 		.expect("Failed to bind to port 9090");
 
@@ -128,9 +129,12 @@ async fn game_server_connect(peers: PeerSockets, config: Config) {
 			let mut peers = peers.lock().await;
 			for (user, ip) in group.users.iter() {
 				if !peers.contains_key(&user.id) {
-					if let Ok((peer, _)) =
-						tokio_tungstenite::connect_async(dbg!(format!("ws://{}:9090", ip.inner)))
-							.await
+					let conn_string = if ip.inner.is_ipv6() {
+						format!("ws://[{}]:9090", ip.inner)
+					} else {
+						format!("ws://{}:9090", ip.inner)
+					};
+					if let Ok((peer, _)) = dbg!(tokio_tungstenite::connect_async(conn_string).await)
 					{
 						println!("User {} connected", user.username);
 						peers.insert(user.id, peer);
