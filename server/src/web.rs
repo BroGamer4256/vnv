@@ -41,9 +41,19 @@ pub async fn join_group(
 ) -> Redirect {
 	if let Some(user_ip) = state.users.read().await.get(&user.id) {
 		let mut groups = state.groups.write().await;
+		for (_, group) in groups
+			.iter_mut()
+			.filter(|(_, group)| group.contains_user(&user))
+			.collect::<Vec<_>>()
+		{
+			if let Some(index) = group.users.iter().position(|(u, _)| u.id == user.id) {
+				group.users.remove(index);
+			}
+		}
 		if let Some(group) = groups.get_mut(&group_id) {
 			group.users.push((user.clone(), user_ip.clone()));
 		}
+		groups.retain(|_, group| group.users.len() > 0);
 	}
 	Redirect::to("/")
 }
