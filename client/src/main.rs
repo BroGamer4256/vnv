@@ -3,7 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::*;
 use socket2::*;
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
+use std::net::*;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -58,38 +58,47 @@ async fn main() {
 	let game_socket = Arc::new(socket);
 	let peer_sockets: PeerSockets = Arc::new(Mutex::new(BTreeMap::new()));
 
-	tokio::spawn(partner_server(game_socket.clone(), "127.0.0.1:9090"));
+	// This occasionally fails but it seems to work anyways?
+	let gateway = igd::search_gateway(Default::default()).unwrap();
+	_ = gateway.add_port(
+		igd::PortMappingProtocol::TCP,
+		9090,
+		gateway.addr,
+		0,
+		"WMMT VS",
+	);
+
+	tokio::spawn(partner_server(game_socket.clone(), "0.0.0.0:9090"));
 	tokio::spawn(partner_server(game_socket.clone(), "[::1]:9090"));
 	tokio::spawn(peer_send(game_socket.clone(), peer_sockets.clone()));
 	game_server_connect(peer_sockets.clone(), config).await;
 }
 
 async fn partner_server_listen(stream: TcpStream, game_socket: Arc<Socket>) {
-	let mut ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
-	let mut last_frame = 0;
-	while let Some(Ok(Message::Binary(data))) = ws_stream.next().await {
-		let buf = &data[4..(data.len() - 4)];
-		if let Ok(decoded) = <wm::Message as prost::Message>::decode(buf) {
-			if let Some(heartbeat) = decoded.heart_beat {
-				if let Some(frame) = heartbeat.frame_number {
-					if frame <= last_frame {
-						continue;
+	if let Ok(mut ws_stream) = tokio_tungstenite::accept_async(stream).await {
+		let mut last_frame = 0;
+		while let Some(Ok(Message::Binary(data))) = ws_stream.next().await {
+			let buf = &data[4..(data.len() - 4)];
+			if let Ok(decoded) = <wm::Message as prost::Message>::decode(buf) {
+				if let Some(heartbeat) = decoded.heart_beat {
+					if let Some(frame) = heartbeat.frame_number {
+						if frame <= last_frame {
+							continue;
+						}
+						last_frame = frame;
 					}
-					last_frame = frame;
 				}
 			}
+			game_socket.send(&data).unwrap();
 		}
-		game_socket.send(&data).unwrap();
 	}
 }
 
 async fn partner_server(game_socket: Arc<Socket>, addr: &str) {
-	let server_socket = TcpListener::bind(addr)
-		.await
-		.expect("Failed to bind to port 9090");
-
-	while let Ok((stream, _)) = server_socket.accept().await {
-		tokio::spawn(partner_server_listen(stream, Arc::clone(&game_socket)));
+	if let Ok(server_socket) = TcpListener::bind(addr).await {
+		while let Ok((stream, _)) = server_socket.accept().await {
+			tokio::spawn(partner_server_listen(stream, Arc::clone(&game_socket)));
+		}
 	}
 }
 
