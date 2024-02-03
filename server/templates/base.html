@@ -15,16 +15,18 @@
 				<li class="navbar-nav">
 					<a class="navbar-brand" href="/">VS No VPN</a>
 				</li>
-				{% if !user.is_some() %}
-				<li class="navbar-nav">
-					<a class="nav-link" href="https://discord.com/api/oauth2/authorize?client_id=1202965157790093393&response_type=code&redirect_uri=https%3A%2F%2Fmaxitune.net%2Flogin&scope=identify">Login</a>
-				</li>
-				{% else %}
+				{% if let Some(user) = user %}
+				{% if users.contains_key(user.id) && !in_group %}
 				<li class="navbar-nav">
 					<a class="nav-link" href="/create_group">Create Group</a>
 				</li>
+				{% endif %}
 				<li class="navbar-nav">
 					<a class="nav-link" href="/guide">Guide</a>
+				</li>
+				{% else %}
+				<li class="navbar-nav">
+					<a class="nav-link" href="https://discord.com/api/oauth2/authorize?client_id=1202965157790093393&response_type=code&redirect_uri=https%3A%2F%2Fmaxitune.net%2Flogin&scope=identify">Login</a>
 				</li>
 				{% endif %}
 				<li class="navbar-nav">

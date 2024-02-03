@@ -8,12 +8,26 @@ use axum_extra::extract::CookieJar;
 pub struct RootTemplate {
 	user: Option<User>,
 	groups: BTreeMap<i64, Group>,
+	users: BTreeMap<i64, IpAddr>,
+	in_group: bool,
 }
 
 pub async fn root(user: Option<User>, State(state): State<AppState>) -> RootTemplate {
+	let groups = state.groups.read().await.clone();
+	let in_group = if let Some(user) = &user {
+		groups
+			.iter()
+			.filter(|(_, group)| group.contains_user(user))
+			.collect::<Vec<_>>()
+			.len() > 0
+	} else {
+		false
+	};
 	RootTemplate {
 		user,
-		groups: state.groups.read().await.clone(),
+		groups,
+		users: state.users.read().await.clone(),
+		in_group,
 	}
 }
 
@@ -21,6 +35,8 @@ pub async fn root(user: Option<User>, State(state): State<AppState>) -> RootTemp
 #[template(path = "guide.html")]
 pub struct GuideTemplate {
 	user: Option<User>,
+	users: BTreeMap<i64, IpAddr>,
+	in_group: bool,
 }
 
 pub async fn create_group(user: User, State(state): State<AppState>) -> Redirect {
@@ -74,8 +90,22 @@ pub async fn leave_group(
 	Redirect::to("/")
 }
 
-pub async fn guide(user: Option<User>) -> GuideTemplate {
-	GuideTemplate { user }
+pub async fn guide(user: Option<User>, State(state): State<AppState>) -> GuideTemplate {
+	let groups = state.groups.read().await.clone();
+	let in_group = if let Some(user) = &user {
+		groups
+			.iter()
+			.filter(|(_, group)| group.contains_user(user))
+			.collect::<Vec<_>>()
+			.len() > 0
+	} else {
+		false
+	};
+	GuideTemplate {
+		user,
+		users: state.users.read().await.clone(),
+		in_group,
+	}
 }
 
 pub async fn config_download(_: User, jar: CookieJar) -> Result<String, StatusCode> {
