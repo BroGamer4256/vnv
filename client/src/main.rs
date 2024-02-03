@@ -58,20 +58,44 @@ async fn main() {
 	let game_socket = Arc::new(socket);
 	let peer_sockets: PeerSockets = Arc::new(Mutex::new(BTreeMap::new()));
 
-	// This occasionally fails but it seems to work anyways?
-	let gateway = igd::search_gateway(Default::default()).unwrap();
-	_ = gateway.add_port(
-		igd::PortMappingProtocol::TCP,
-		9090,
-		gateway.addr,
-		0,
-		"WMMT VS",
-	);
+	_ = simplelog::SimpleLogger::init(simplelog::LevelFilter::Debug, Default::default());
+
+	let gateway = igd::aio::search_gateway(Default::default()).await.unwrap();
+	let local = local_ip_address::local_ip().unwrap();
+	let addr = if let std::net::IpAddr::V4(addr) = local {
+		addr
+	} else {
+		panic!("")
+	};
+	gateway
+		.add_port(
+			igd::PortMappingProtocol::TCP,
+			9090,
+			SocketAddrV4::new(addr, 9090),
+			0,
+			"wmmt_vs",
+		)
+		.await
+		.unwrap();
+
+	let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+	let r = running.clone();
+
+	ctrlc::set_handler(move || {
+		r.store(false, std::sync::atomic::Ordering::SeqCst);
+	})
+	.unwrap();
 
 	tokio::spawn(partner_server(game_socket.clone(), "0.0.0.0:9090"));
 	tokio::spawn(partner_server(game_socket.clone(), "[::1]:9090"));
 	tokio::spawn(peer_send(game_socket.clone(), peer_sockets.clone()));
-	game_server_connect(peer_sockets.clone(), config).await;
+	tokio::spawn(game_server_connect(peer_sockets.clone(), config));
+	while running.load(std::sync::atomic::Ordering::SeqCst) {}
+
+	gateway
+		.remove_port(igd::PortMappingProtocol::TCP, 9090)
+		.await
+		.unwrap();
 }
 
 async fn partner_server_listen(stream: TcpStream, game_socket: Arc<Socket>) {
