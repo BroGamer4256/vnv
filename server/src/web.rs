@@ -57,6 +57,15 @@ pub async fn join_group(
 ) -> Redirect {
 	if let Some(user_ip) = state.users.read().await.get(&user.id) {
 		let mut groups = state.groups.write().await;
+		if let Some(group) = groups.get_mut(&group_id) {
+			if group.users.len() < 4 {
+				group.users.push((user.clone(), user_ip.clone()));
+			} else {
+				return Redirect::to("/");
+			}
+		} else {
+			return Redirect::to("/");
+		}
 		for (_, group) in groups
 			.iter_mut()
 			.filter(|(_, group)| group.contains_user(&user))
@@ -65,9 +74,6 @@ pub async fn join_group(
 			if let Some(index) = group.users.iter().position(|(u, _)| u.id == user.id) {
 				group.users.remove(index);
 			}
-		}
-		if let Some(group) = groups.get_mut(&group_id) {
-			group.users.push((user.clone(), user_ip.clone()));
 		}
 		groups.retain(|_, group| group.users.len() > 0);
 	}
