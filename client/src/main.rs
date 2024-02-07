@@ -13,8 +13,6 @@ use tokio_tungstenite::*;
 
 type PeerSockets = Arc<Mutex<BTreeMap<i64, WebSocketStream<MaybeTlsStream<TcpStream>>>>>;
 
-mod wm;
-
 #[derive(Deserialize, Serialize)]
 struct Config {
 	pub jwt: String,
