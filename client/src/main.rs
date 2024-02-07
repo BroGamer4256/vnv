@@ -11,7 +11,6 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::*;
 
-const CHECKSUM: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_MPEG_2);
 type PeerSockets = Arc<Mutex<BTreeMap<i64, WebSocketStream<MaybeTlsStream<TcpStream>>>>>;
 
 mod wm;
@@ -94,7 +93,7 @@ async fn partner_server<A: tokio::net::ToSocketAddrs + std::fmt::Display>(
 ) {
 	let server_socket = TcpListener::bind(&addr).await.expect("Failed to bind");
 	while let Ok((stream, _)) = server_socket.accept().await {
-		tokio::spawn(partner_server_listen(stream, Arc::clone(&game_socket)));
+		tokio::spawn(partner_server_listen(stream, game_socket.clone()));
 	}
 }
 
@@ -118,7 +117,7 @@ async fn peer_send(game_socket: Arc<Socket>, peers: PeerSockets) {
 		if self_id == u8::MAX {
 			if size > 2 && buf[1] != 4 {
 				self_id = buf[1];
-				dbg!(self_id);
+				dbg!(self_id + 1);
 			}
 		}
 		if size < 2 || buf[1] == 4 || buf[1] != self_id {
