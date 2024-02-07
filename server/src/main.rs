@@ -8,7 +8,7 @@ use jsonwebtoken::*;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::BTreeMap;
 use std::env;
-use std::str::FromStr;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -85,20 +85,31 @@ async fn main() {
 	axum::serve(listener, app).await.unwrap();
 }
 
-async fn client(ws: WebSocketUpgrade, ip: IpAddr, State(state): State<AppState>) -> Response {
-	ws.on_upgrade(|socket| client_socket(socket, ip, state))
+async fn client(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+	ws.on_upgrade(|socket| client_socket(socket, state))
 }
 
-async fn client_socket(mut socket: WebSocket, ip: IpAddr, state: AppState) {
-	let user = if let Some(Ok(Message::Text(jwt))) = socket.recv().await {
-		User::parse(&jwt, &state).await
+async fn client_socket(mut socket: WebSocket, state: AppState) {
+	let config = if let Some(Ok(Message::Text(config))) = socket.recv().await {
+		serde_json::from_str(&config)
 	} else {
 		return;
 	};
-	if user.is_err() {
+	if config.is_err() {
 		return;
 	}
-	let user = user.unwrap();
+	let config: UserConfig = config.unwrap();
+	let ip = if let Some(ip) = config.ip {
+		ip
+	} else {
+		return;
+	};
+	let user = if let Ok(user) = User::parse(&config.jwt, &state).await {
+		user
+	} else {
+		return;
+	};
+	println!("User {} connected with ip {}", user.username, ip);
 	{
 		let mut users = state.users.write().await;
 		users.insert(user.id, ip);
@@ -117,6 +128,10 @@ async fn client_socket(mut socket: WebSocket, ip: IpAddr, state: AppState) {
 				if let Ok(json) = serde_json::to_string(&group) {
 					_ = socket.send(Message::Text(json)).await;
 				}
+			} else {
+				if let Ok(json) = serde_json::to_string(&Group { users: vec![] }) {
+					_ = socket.send(Message::Text(json)).await;
+				}
 			}
 		}
 
@@ -128,11 +143,11 @@ async fn client_socket(mut socket: WebSocket, ip: IpAddr, state: AppState) {
 	}
 	{
 		let mut groups = state.groups.write().await;
-		let groups = groups
+		let user_groups = groups
 			.iter_mut()
 			.filter(|(_, group)| group.contains_user(&user))
 			.collect::<Vec<_>>();
-		for (_, group) in groups {
+		for (_, group) in user_groups {
 			let index = group
 				.users
 				.iter()
@@ -140,9 +155,6 @@ async fn client_socket(mut socket: WebSocket, ip: IpAddr, state: AppState) {
 				.unwrap();
 			group.users.remove(index);
 		}
-	}
-	{
-		let mut groups = state.groups.write().await;
 		groups.retain(|_, group| group.users.len() > 0);
 	}
 }

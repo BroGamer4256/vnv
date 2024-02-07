@@ -2,6 +2,7 @@ use crate::*;
 use askama::Template;
 use axum::{http::StatusCode, response::Redirect};
 use axum_extra::extract::CookieJar;
+use std::net::IpAddr;
 
 #[derive(Template)]
 #[template(path = "root.html")]
@@ -117,12 +118,9 @@ pub async fn config_download(_: User, jar: CookieJar) -> Result<String, StatusCo
 		.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 	let jwt = cookie.value();
 
-	#[derive(serde::Serialize)]
-	struct Config {
-		jwt: String,
-	}
-	let config = Config {
+	let config = UserConfig {
 		jwt: String::from(jwt),
+		ip: None,
 	};
 
 	serde_json::to_string(&config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)

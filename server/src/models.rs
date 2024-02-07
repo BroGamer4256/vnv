@@ -192,25 +192,8 @@ pub async fn login(
 	Err(StatusCode::UNAUTHORIZED)
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct IpAddr {
-	pub inner: std::net::IpAddr,
-}
-
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for IpAddr
-where
-	S: Send + Sync,
-{
-	type Rejection = StatusCode;
-
-	async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-		let forwarded = parts
-			.headers
-			.get("x-forwarded-for")
-			.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-		let ip = forwarded.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
-		let ip = std::net::IpAddr::from_str(ip).map_err(|_| StatusCode::BAD_REQUEST)?;
-		Ok(Self { inner: ip })
-	}
+#[derive(Deserialize, Serialize)]
+pub struct UserConfig {
+	pub jwt: String,
+	pub ip: Option<IpAddr>,
 }
